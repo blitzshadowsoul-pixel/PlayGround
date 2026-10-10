@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Grand Sea Saga - Pirate Text RPG</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin:0; font-family: system-ui, -apple-system, sans-serif; background:#0a1628; color:#f0e6d2; display:flex; flex-direction:column; min-height:100vh; }
+  header { background:#c1272d; padding:12px; text-align:center; font-weight:900; font-size:1.2rem; letter-spacing:1px; position:sticky; top:0; z-index:10; }
+  header small { display:block; font-weight:400; font-size:.75rem; opacity:.9; }
+  #stats { display:flex; gap:8px; padding:8px; background:#132540; font-size:.8rem; flex-wrap:wrap; position:sticky; top:58px; z-index:9; }
+  #stats div { background:#1e3a5f; padding:4px 10px; border-radius:20px; white-space:nowrap; }
+  #mapWrap { background:#081120; text-align:center; padding:4px; }
+  canvas { max-width:100%; width:100%; height:140px; background:linear-gradient(#1a6daa,#0a3a5f); border-radius:8px; touch-action:none; }
+  #story { flex:1; padding:16px; max-width:720px; margin:0 auto; width:100%; font-size:1.05rem; line-height:1.6; white-space:pre-wrap; }
+  #choices { padding:12px; max-width:720px; margin:0 auto; width:100%; display:grid; gap:10px; padding-bottom:120px; }
+  button.choice { background:#f5c518; color:#111; border:none; border-radius:12px; padding:14px; font-size:1rem; font-weight:700; text-align:left; min-height:56px; }
+  button.choice:active { transform:scale(.98); background:#ffdd33; }
+  #toolbar { position:fixed; bottom:0; left:0; right:0; display:flex; gap:8px; padding:10px; background:#000000cc; backdrop-filter:blur(8px); }
+  #toolbar button { flex:1; padding:12px; border-radius:10px; border:1px solid #444; background:#222; color:#fff; font-weight:700; }
+  #modal { display:none; position:fixed; inset:0; background:#000000d9; z-index:50; padding:20px; overflow:auto; }
+  #modalCard { background:#132540; border-radius:12px; padding:18px; max-width:520px; margin:20px auto; }
+  #modalCard h2 { margin-top:0; }
+  #modalCard input, #modalCard select { width:100%; padding:12px; margin:6px 0 12px; border-radius:8px; border:1px solid #555; font-size:1rem; }
+  .row { display:flex; gap:8px; }
+  .row button { flex:1; }
+  .btn-primary { background:#c1272d !important; color:#fff !important; border:none !important; }
+  .cheatBtn { display:block; width:100%; margin:6px 0; padding:12px; border-radius:8px; background:#2a4a7a; color:#fff; border:1px solid #4a7ab5; font-weight:600; }
+</style>
+</head>
+<body>
+<header>🏴‍☠️ GRAND SEA SAGA <small>Original pirate-inspired text RPG • SFW • Mobile friendly</small></header>
+<div id="stats"></div>
+<div id="mapWrap"><canvas id="sea" width="700" height="140"></canvas></div>
+<div id="story">Loading...</div>
+<div id="choices"></div>
+<div id="toolbar">
+  <button onclick="openModal('char')">🎭 Hero</button>
+  <button onclick="openModal('save')">💾 Save</button>
+  <button onclick="openModal('cheat')">⚙️ Cheats</button>
+  <button onclick="restart()">🔄 New</button>
+</div>
+<div id="modal"><div id="modalCard"></div></div>
+
+<script>
+// ===== Grand Sea Saga - SFW pirate text RPG =====
+// Inspired by One Piece themes (adventure, crew, dreams) with ORIGINAL characters.
+const S = {
+  name:"", pronouns:"they/them", style:"Swordsman", origin:"East Shell Village",
+  hp:100, maxHp:100, atk:10, def:5, gold:50, chapter:0, crew:[], bond:{}, flags:{},
+  history:[], // for rewind cheat
+};
+
+const STYLES = {
+  "Swordsman":{atk:12,def:6,hp:110,desc:"Master of three-sword flow."},
+  "Brawler":{atk:14,def:8,hp:130,desc:"Fists harder than cannonballs."},
+  "Sharpshooter":{atk:13,def:4,hp:90,desc:"Never misses. Sniper king."},
+  "Tide Fruit User":{atk:15,def:5,hp:100,desc:"Ate a Mystic Fruit. Controls splashes. Can't swim."}
+};
+const ORIGINS = ["East Shell Village","Desert Sand Kingdom","Sky Cloud Island","Fishfolk Reef"];
+
+let nodeId = "start";
+let playerX = 20;
+
+function saveHistory(){ S.history.push(JSON.stringify({nodeId,S:{...S,history:[]},playerX})); if(S.history.length>50) S.history.shift(); }
+function rewind(){ if(!S.history.length){ alert("No rewind point!"); return;} const h=JSON.parse(S.history.pop()); nodeId=h.nodeId; Object.assign(S,h.S); S.history=h.S.history||S.history; playerX=h.playerX; render(); }
+
+const NODES = {
+start:{ title:"Prologue", text:()=>`Dawn over the Grand Sea.\n\nYou are ${S.name||"a young dreamer"} (${S.pronouns}, ${S.style} from ${S.origin}). You want to find the LEGENDARY TIDE CROWN and become King of Pirates — not for gold, but to prove freedom is real.\n\nMarine Captain Steeljaw blocks the harbor with 2 warships. Your tiny dinghy can't pass... unless you act.`, choices:()=>[
+  {t:"⚔️ Challenge Steeljaw head-on!", go:"fight1"},
+  {t:"🌫️ Sneak through the foggy reef (risky)", go:"reef"},
+  {t:"🤝 Recruit help at the tavern first", go:"tavern"},
+  {t:"🛠️ Sabotage warship rudders at night", go:"sabotage"},
+  {t:"🗺️ Ask the Old Cartographer for a secret route", go:"cartographer"},
+]},
+tavern:{ text:`Rusty Anchor Tavern. Three would-be crewmates argue:\n\n• KARA (navigator, 28, sharp-tongued, ex-marine deserter)\n• BORGO (cook, 35, giant-hearted)\n• PICO (shipwright cabin-boy turned teen prodigy? No — 24, genius inventor)\n\nAll adults. All dreamers. Who do you befriend first? Your bond affects battles.`, choices:()=>[
+  {t:"🧭 Impress Kara with navigation riddle", go:"kara"},
+  {t:"🍖 Win Borgo with appetite contest", go:"borgo"},
+  {t:"🔧 Help Pico fix his steam engine", go:"pico"},
+  {t:"🍻 Buy a round for EVERYONE (costs 30 gold)", go:"allFriends"},
+  {t:"👀 Just observe and leave alone", go:"fight1"},
+]},
+kara:{ text:`Kara tests you: "If Log Pose points north but island current pushes east, what do you trust?"`, choices:()=>[
+  {t:"'My crew, not the needle.'", go:"joinKara"},
+  {t:"'The needle. Logic over heart.'", go:"joinKara2"},
+  {t:"'We go east to learn why.'", go:"joinKara"},
+  {t:"'We smash the Log Pose! Adventure!' ", go:"joinFun"},
+  {t:"⬅️ Back to tavern", go:"tavern"},
+]},
+borgo:{ text:`Borgo slams a 5kg meat platter. "Eat! Strong pirates eat!"`, choices:()=>[
+  {t:"Devour it all! (HP test)", go:"joinBorgo"},
+  {t:"Share with the tavern kids", go:"joinBorgoKind"},
+  {t:"Cook YOUR hometown dish for him", go:"joinBorgo"},
+  {t:"Challenge him to arm-wrestle instead", go:"joinBorgo"},
+  {t:"⬅️ Back", go:"tavern"},
+]},
+pico:{ text:`Pico's engine sputters. "I need a warrior's steady hands!"`, choices:()=>[
+  {t:"Hold the boiler valve (take 10 dmg, gain loyalty)", go:"joinPico"},
+  {t:"Redesign intake with physics", go:"joinPico"},
+  {t:"Find spare parts in junkyard", go:"junkyard"},
+  {t:"Cheer him on (charisma)", go:"joinPico"},
+  {t:"⬅️ Back", go:"tavern"},
+]},
+joinKara:{ onEnter(){addCrew("Kara"); bondUp("Kara")}, text:`Kara grins. "Good answer. I'm sailing with you, Captain ${S.name}!"\n\n[ Kara joined! + navigation, unlocks secret routes ]`, choices:()=>baseAfterRecruit()},
+joinKara2:{ onEnter(){addCrew("Kara")}, text:`Kara nods slowly. "Cold... but correct. Fine, I'll join."`, choices:()=>baseAfterRecruit()},
+joinFun:{ onEnter(){addCrew("Kara");addCrew("Pico")}, text:`Everyone laughs! Kara & Pico both love your chaos. Both join!`, choices:()=>baseAfterRecruit()},
+joinBorgo:{ onEnter(){addCrew("Borgo"); S.maxHp+=20; S.hp=S.maxHp}, text:`Borgo cries with joy. "You have the stomach of a KING! I join!" [Max HP +20]`, choices:()=>baseAfterRecruit()},
+joinBorgoKind:{ onEnter(){addCrew("Borgo"); bondUp("Borgo"); bondUp("Borgo")}, text:`Borgo weeps. "You fed kids before yourself... You ARE a true captain." [Strong bond]`, choices:()=>baseAfterRecruit()},
+joinPico:{ onEnter(){addCrew("Pico")}, text:`Engine ROARS! Pico hugs you. "You fixed my dream! I'm yours!" [Pico joined, ship upgraded]`, choices:()=>baseAfterRecruit()},
+allFriends:{ onEnter(){ S.gold-=30; addCrew("Kara");addCrew("Borgo");addCrew("Pico")}, text:`You spend 30 gold. The whole tavern sings! All THREE join! This is the start of your crew.`, choices:()=>baseAfterRecruit()},
+junkyard:{ text:`Junkyard run — wild Scrap Crabs attack!`, choices:()=>[
+  {t:"⚔️ Fight crabs", go:"crabFight"},
+  {t:"🏃 Lure them away with meat", go:"joinPico"},
+  {t:"🪤 Build a trap (Pico helps)", go:"joinPico"},
+  {t:"💰 Buy parts instead (-20 gold)", go:"joinPico"},
+  {t:"⬅️ Flee", go:"tavern"},
+]},
+crabFight:{ fight:{enemy:"Scrap Crab Swarm", ehp:40, eatk:8}, win:"joinPico", lose:"tavern" },
+fight1:{ fight:{enemy:"Marine Captain Steeljaw", ehp:60, eatk:10}, win:"afterSteel", lose:"defeat" },
+reef:{ text:`Foggy reef... You scrape rocks (lose 15 HP) but slip past!`, onEnter(){hurt(15)}, choices:()=>[
+  {t:"⛵ Push to Sand Kingdom", go:"sand"},
+  {t:"🏝️ Land on Mystery Island", go:"mystery"},
+  {t:"🔙 Turn back to recruit", go:"tavern"},
+  {t:"🎣 Fish & rest (+20 HP)", go:"restReef"},
+  {t:"🌊 Dive for treasure (-10 HP, +gold?)", go:"dive"},
+]},
+restReef:{ onEnter(){heal(20)}, text:`Fresh fish soup. HP restored.`, choices:()=>[{t:"Continue",go:"sand"},{t:"Mystery Island",go:"mystery"},{t:"Tavern",go:"tavern"},{t:"Check status",go:"restReef"},{t:"Rest more (+10)",go:"restReef2"}]},
+restReef2:{ onEnter(){heal(10)}, text:`Well rested!`, choices:()=>[{t:"To Sand Kingdom",go:"sand"},{t:"To Mystery Isle",go:"mystery"},{t:"Back",go:"tavern"},{t:"Stay",go:"restReef2"},{t:"Train (+2 ATK)",go:"train"}]},
+train:{ onEnter(){S.atk+=2}, text:`You swing your weapon 1000 times. ATK +2!`, choices:()=>baseTravel()},
+dive:{ onEnter(){ hurt(10); S.gold+=40 }, text:`You find a sunken chest! +40 gold, -10 HP.`, choices:()=>baseTravel()},
+sabotage:{ text:`Night infiltration of warship... Guard dogs!`, choices:()=>[
+  {t:"🥩 Drug meat for dogs", go:"afterSteel"},
+  {t:"🥷 Knock out guards stealthily", go:"afterSteel"},
+  {t:"💥 Just blow the rudder! (fight)", go:"fight1"},
+  {t:"🙏 Get caught & talk your way out", go:"tavern"},
+  {t:"Abort", go:"start"},
+]},
+cartographer:{ text:`Old Mapmaker Lin (72) shows a hidden trench current. "Only a true dreamer dares..."`, choices:()=>[
+  {t:"Take trench route (unlock mystery island)", go:"mystery"},
+  {t:"Ask Lin to join as advisor", go:"linJoin"},
+  {t:"Buy Grand Sea chart (-20 gold)", go:"buyChart"},
+  {t:"Thank & go to tavern", go:"tavern"},
+  {t:"Head straight to battle", go:"fight1"},
+]},
+linJoin:{ onEnter(){addCrew("Lin")}, text:`Lin cackles. "My last adventure! I join!" [Advisor: see enemy HP]`, choices:()=>baseAfterRecruit()},
+buyChart:{ onEnter(){S.gold-=20; S.flags.chart=true}, text:`Chart acquired! You see all currents.`, choices:()=>baseTravel()},
+afterSteel:{ text:`Steeljaw defeated / bypassed! The sea opens! Your bounty: 50,000 berries! Where next, Captain ${S.name}?`, onEnter(){S.gold+=30; S.chapter=1; playerX=180}, choices:()=>baseTravel()},
+sand:{ text:`SAND KINGDOM — desert festival. Princess Mira (29, archaeologist) seeks the Tide Crown text. Warlord Crocodune threatens the oasis.`, onEnter(){playerX=350}, choices:()=>[
+  {t:"⚔️ Help Mira vs Crocodune", go:"duneFight"},
+  {t:"📜 Study poneglyph-like ruins with Mira", go:"ruins"},
+  {t:"🏜️ Enter Sand Race for gold", go:"race"},
+  {t:"🍹 Rest at oasis (heal full)", go:"oasis"},
+  {t:"⛵ Sail to Sky Island", go:"sky"},
+]},
+duneFight:{ fight:{enemy:"Warlord Crocodune", ehp:90, eatk:13}, win:"afterDune", lose:"defeat" },
+afterDune:{ onEnter(){addCrew("Mira"); S.gold+=100; playerX=420}, text:`Crocodune falls! Mira joins as scholar! "Let's find the Crown TOGETHER." +100 gold. Friendships deepen (non-romantic bonds, or fade-to-black romance if you choose).`, choices:()=>[
+  {t:"💬 Ask Mira about Crown lore", go:"lore"},
+  {t:"🎉 Feast with crew (heal)", go:"feast"},
+  {t:"☁️ Fly to Sky Island", go:"sky"},
+  {t:"🌊 Sail to Final Storm Veil", go:"finale"},
+  {t:"🛠️ Upgrade ship (-50 gold, +DEF)", go:"upgrade"},
+]},
+ruins:{ text:`Ancient text: "When storm cries, crown chooses the free heart."`, choices:()=>[
+  {t:"Copy the text (wisdom)", go:"afterDune"},
+  {t:"Protect ruins from looters (fight)", go:"duneFight"},
+  {t:"Ask Mira to translate more", go:"lore"},
+  {t:"Rest", go:"sand"},
+  {t:"Leave to Sky Island", go:"sky"},
+]},
+lore:{ text:`Mira: "Tide Crown is at Storm Veil. Only a crew bound by trust can pass. No king rules alone."`, choices:()=>[
+  {t:"'Then we'll go together!'", go:"sky"},
+  {t:"Upgrade ship", go:"upgrade"},
+  {t:"Feast", go:"feast"},
+  {t:"Go to finale now!", go:"finale"},
+  {t:"Back to desert", go:"sand"},
+]},
+race:{ onEnter(){S.gold+=60; hurt(5)}, text:`You win 2nd place! +60 gold, -5 HP from heat.`, choices:()=>baseTravel()},
+oasis:{ onEnter(){S.hp=S.maxHp}, text:`Full heal at oasis.`, choices:()=>baseTravel()},
+feast:{ onEnter(){S.hp=S.maxHp}, text:`Borgo's feast! HP full, crew bonds +++.`, choices:()=>[
+  {t:"To Sky Island",go:"sky"},{t:"To Finale",go:"finale"},{t:"To Desert",go:"sand"},{t:"Train (+ATK)",go:"train"} ,{t:"Count gold",go:"feast"}
+]},
+upgrade:{ onEnter(){ if(S.gold>=50){S.gold-=50; S.def+=3;} }, text:`Ship plated! DEF +3 (if you had 50g).`, choices:()=>baseTravel()},
+mystery:{ text:`Mystery Island — talking lighthouse keeper offers trial.`, onEnter(){playerX=260}, choices:()=>[
+  {t:"🗝️ Trial of Courage (fight Shade)", go:"shadeFight"},
+  {t:"🧩 Trial of Wit (riddle)", go:"riddle"},
+  {t:"❤️ Trial of Heart (give 30 gold to poor)", go:"heartTrial"},
+  {t:"Just explore jungle", go:"jungle"},
+  {t:"Sail away", go:"sand"},
+]},
+shadeFight:{ fight:{enemy:"Island Shade", ehp:70, eatk:11}, win:"shadeWin", lose:"defeat" },
+shadeWin:{ onEnter(){S.atk+=3; S.gold+=50}, text:`Shade bows. ATK +3, +50 gold.`, choices:()=>baseTravel()},
+riddle:{ text:`"I have seas without water, coasts without sand. What am I?"`, choices:()=>[
+  {t:"A map!", go:"shadeWin"},
+  {t:"A desert", go:"riddleFail"},
+  {t:"A dream", go:"riddleFail"},
+  {t:"A cloud", go:"riddleFail"},
+  {t:"Ask crew for hint", go:"shadeWin"},
+]},
+riddleFail:{ onEnter(){hurt(10)}, text:`Wrong! Lighthouse zaps you (-10 HP). Try again?`, choices:()=>[{t:"A map!",go:"shadeWin"},{t:"Give up",go:"mystery"},{t:"Fight lighthouse",go:"shadeFight"},{t:"Bribe (-20g)",go:"shadeWin"},{t:"Leave",go:"sand"}]},
+heartTrial:{ onEnter(){S.gold-=30}, text:`You give gold. The island blooms! Healing fruit: MaxHP +20.`, choices:()=>[{t:"Eat fruit",go:"eatFruit"},{t:"Save fruit",go:"sand"},{t:"Share fruit",go:"shareFruit"},{t:"Stay",go:"mystery"},{t:"To sky",go:"sky"}]},
+eatFruit:{ onEnter(){S.maxHp+=20; S.hp=S.maxHp}, text:`Max HP up!`, choices:()=>baseTravel()},
+shareFruit:{ onEnter(){S.maxHp+=10; S.hp=S.maxHp; }, text:`Shared with crew! Bonds up!`, choices:()=>baseTravel()},
+jungle:{ onEnter(){S.gold+=20}, text:`You find bananas & +20 gold from old pirate cache.`, choices:()=>baseTravel()},
+sky:{ text:`SKY ISLAND — clouds you can walk on! Guardian Enma (31, sky knight) blocks the Storm Veil gate.`, onEnter(){playerX=520}, choices:()=>[
+  {t:"⚔️ Duel Enma honorably", go:"enmaFight"},
+  {t:"🕊️ Prove peaceful intent (give food)", go:"enmaPeace"},
+  {t:"🎈 Sneak via thunder cloud", go:"thunder"},
+  {t:"🔧 Have Pico build cloud glider", go:"glider"},
+  {t:"Return to desert", go:"sand"},
+]},
+enmaFight:{ fight:{enemy:"Sky Knight Enma", ehp:110, eatk:14}, win:"afterEnma", lose:"defeat" },
+enmaPeace:{ onEnter(){addCrew("Enma")}, text:`Enma kneels. "Your heart is sky-clear. I join!"`, choices:()=>[{t:"Enter Storm Veil!",go:"finale"},{t:"Rest",go:"feast"},{t:"Train",go:"train"},{t:"Check crew",go:"enmaPeace"},{t:"Upgrade",go:"upgrade"}]},
+afterEnma:{ onEnter(){addCrew("Enma"); S.gold+=80}, text:`Enma yields. "Strong AND kind... take me with you!"`, choices:()=>[{t:"Enter Storm Veil!",go:"finale"},{t:"Rest",go:"feast"},{t:"Train",go:"train"},{t:"Upgrade",go:"upgrade"},{t:"Talk",go:"lore"}]},
+thunder:{ onEnter(){hurt(20)}, text:`Thunder burns (-20 HP) but you slip through!`, choices:()=>[{t:"To Finale!",go:"finale"},{t:"Heal first",go:"feast"},{t:"Back",go:"sky"},{t:"Train",go:"train"},{t:"Explore",go:"sky"}]},
+glider:{ text:`Pico needs 30 gold for glider parts.`, choices:()=>[
+  {t:"Pay 30g", go:"gliderPay"},
+  {t:"Fight Enma instead", go:"enmaFight"},
+  {t:"Sneak instead", go:"thunder"},
+  {t:"Negotiate peace", go:"enmaPeace"},
+  {t:"Back", go:"sky"},
+]},
+gliderPay:{ onEnter(){S.gold-=30}, text:`Glider soars over the gate! No fight needed.`, choices:()=>[{t:"To Finale!",go:"finale"},{t:"Back",go:"sky"},{t:"Rest",go:"feast"},{t:"Train",go:"train"},{t:"Explore sky",go:"sky"}]},
+finale:{ text:`⛈️ STORM VEIL — final whirlpool. The Tide Crown glimmers. Fleet Admiral Maelstrom (final boss) roars: "Pirates will drown!"\n\nCrew: ${"none yet — you came alone?!"||""}\n\nThis is it, Captain.`, onEnter(){playerX=640}, choices:()=>[
+  {t:"⚔️ ALL-OUT CREW ATTACK!", go:"bossFight"},
+  {t:"🌪️ Use trench current trick", go:"bossTrick"},
+  {t:"📣 Inspiring speech (heal + buff)", go:"speech"},
+  {t:"🏳️ Try to talk Maelstrom down", go:"talkBoss"},
+  {t:"⬅️ Retreat & prepare more", go:"sky"},
+]},
+bossFight:{ fight:{enemy:"Fleet Admiral Maelstrom", ehp:150, eatk:16}, win:"ending", lose:"defeat" },
+bossTrick:{ onEnter(){hurt(15)}, text:`Trick works partly! Boss weakened but you took 15 dmg. Finish him!`, choices:()=>[
+  {t:"Now attack!",go:"bossFight2"},{t:"Speech",go:"speech"},{t:"Heal",go:"feast"},{t:"Talk",go:"talkBoss"},{t:"Retreat",go:"sky"}
+]},
+bossFight2:{ fight:{enemy:"Weakened Maelstrom", ehp:90, eatk:12}, win:"ending", lose:"defeat" },
+speech:{ onEnter(){ S.atk+=2; heal(30)}, text:`"WE ARE FREE! WE SAIL TOGETHER!" ATK+2, +30 HP!`, choices:()=>[{t:"ATTACK!",go:"bossFight"},{t:"Trick",go:"bossTrick"},{t:"Talk",go:"talkBoss"},{t:"Retreat",go:"sky"},{t:"Speech again!",go:"speech"}]},
+talkBoss:{ text:`Maelstrom hesitates... "You remind me of my youth..." He lowers his sword 50%.`, choices:()=>[
+  {t:"Spare him & claim Crown (kind end)", go:"ending"},
+  {t:"Still duel him (hero end)", go:"bossFight2"},
+  {t:"Invite him to crew!", go:"endingRecruit"},
+  {t:"Grab Crown while he talks!", go:"ending"},
+  {t:"Retreat", go:"sky"},
+]},
+ending:{ text:`👑 YOU CLAIM THE TIDE CROWN!\n\nFireworks over the Grand Sea. ${S.name}, King of Pirates, with crew: ${"your found family"}.\n\nMira writes history. Borgo cooks. Kara navigates. Pico builds. Enma guards the sky.\n\nNo one rules alone — freedom is shared.\n\n★ THE END ★ (Try Cheats → New Game+ or rewind to try other routes!)`, onEnter(){playerX=690}, choices:()=>[
+  {t:"🔄 New Game+",go:"start"},{t:"🌤️ Free sail (explore)",go:"sand"},{t:"☁️ Visit sky",go:"sky"},{t:"📊 View hero",go:"start"},{t:"⚙️ Open cheats",go:"start"}
+]},
+endingRecruit:{ text:`Maelstrom joins as ally! New era of Marines + Pirates together. BEST ENDING! 👑`, choices:()=>[
+  {t:"New Game+",go:"start"},{t:"Free sail",go:"sand"},{t:"Sky",go:"sky"},{t:"Feast",go:"feast"},{t:"Cheats",go:"start"}
+]},
+defeat:{ text:`💀 Defeated... But dreams never die! A mysterious albatross rescues you.`, choices:()=>[
+  {t:"↩️ Rewind to last checkpoint (FREE)", go:"__rewind"},
+  {t:"❤️ Revive with full HP (cheat-like)", go:"revive"},
+  {t:"🏝️ Wake in tavern", go:"tavern"},
+  {t:"🔄 Restart story", go:"start"},
+  {t:"⚙️ Open cheats", go:"start"},
+]},
+revive:{ onEnter(){S.hp=S.maxHp}, text:`Miracle! Full HP!`, choices:()=>baseTravel()},
+};
+
+function baseAfterRecruit(){ return [{t:"⛵ Set sail to Sand Kingdom",go:"sand"},{t:"🏝️ Explore Mystery Island",go:"mystery"},{t:"⚔️ Face Steeljaw now",go:"fight1"},{t:"🍻 Recruit more in tavern",go:"tavern"},{t:"🛠️ Train (+2 ATK)",go:"train"}]; }
+function baseTravel(){ return [{t:"🏜️ Sand Kingdom",go:"sand"},{t:"🏝️ Mystery Island",go:"mystery"},{t:"☁️ Sky Island",go:"sky"},{t:"⛈️ Storm Veil (finale)",go:"finale"},{t:"🍖 Feast / Heal",go:"feast"}]; }
+
+function addCrew(n){ if(!S.crew.includes(n)){S.crew.push(n); S.bond[n]=1;} }
+function bondUp(n){ S.bond[n]=(S.bond[n]||0)+1; }
+function hurt(n){ S.hp=Math.max(1,S.hp-n); }
+function heal(n){ S.hp=Math.min(S.maxHp,S.hp+n); }
+
+function render(){
+  const node=NODES[nodeId];
+  if(node.onEnter && !node._done){ /* run once per visit? run every */ node.onEnter(); }
+  document.getElementById("stats").innerHTML =
+    `<div>❤️ ${S.hp}/${S.maxHp}</div><div>⚔️ ${S.atk}</div><div>🛡️ ${S.def}</div><div>🪙 ${S.gold}</div><div>👥 ${S.crew.length}</div><div>📍 ${nodeId}</div>`;
+  let txt = typeof node.text==="function"?node.text():node.text;
+  if(S.crew.length) txt+=`\n\nCrew: ${S.crew.join(", ")}`;
+  document.getElementById("story").textContent = txt;
+  const box=document.getElementById("choices"); box.innerHTML="";
+  let ch = node.choices?node.choices():[];
+  // fight node handling
+  if(node.fight){ startFight(node, ch); return; }
+  ch.forEach(c=>{
+    const b=document.createElement("button"); b.className="choice"; b.textContent=c.t;
+    b.onclick=()=>{ saveHistory(); if(c.go==="__rewind"){rewind();return;} nodeId=c.go; render(); drawMap(); };
+    box.appendChild(b);
+  });
+  drawMap();
+}
+
+function startFight(node, _){
+  const F=node.fight;
+  let ehp=F.ehp, round=1;
+  const box=document.getElementById("choices"); box.innerHTML="";
+  const log=document.getElementById("story");
+  function turn(playerMove){
+    saveHistorySkip();
+    let dmgToEnemy = Math.max(1, S.atk + rand(0,4) - 2 + (playerMove==="heavy"?4:0) + S.crew.length*2);
+    let dmgToMe = Math.max(0, F.eatk + rand(-2,3) - S.def + (playerMove==="defend"?-5:0));
+    if(playerMove==="defend") dmgToEnemy=Math.floor(dmgToEnemy/2);
+    ehp-=dmgToEnemy; S.hp-=dmgToMe;
+    log.textContent=`⚔️ ${F.enemy} — Round ${round}\nYou use ${playerMove}!\nDealt ${dmgToEnemy} dmg (Foe HP: ${Math.max(0,ehp)}).\nTook ${dmgToMe} dmg (Your HP: ${Math.max(0,S.hp)}).`+(S.crew.length?`\nCrew cheers! (+${S.crew.length*2} bonus)`:"")+`\n\nChoose next move:`;
+    document.getElementById("stats").innerHTML=`<div>❤️ ${Math.max(0,S.hp)}/${S.maxHp}</div><div>⚔️ ${S.atk}</div><div>🛡️ ${S.def}</div><div>👥 ${S.crew.length}</div><div>👹 ${Math.max(0,ehp)}</div>`;
+    round++;
+    if(ehp<=0){ S.gold+=20; nodeId=node.win; setTimeout(render,800); box.innerHTML="<p>Victory! +20 gold...</p>"; return; }
+    if(S.hp<=0){ S.hp=1; nodeId=node.lose; setTimeout(render,800); box.innerHTML="<p>Defeated...</p>"; return; }
+    showMoves();
+  }
+  function saveHistorySkip(){ /* don't spam history in fight, push once at start */ }
+  function showMoves(){
+    box.innerHTML="";
+    [["⚔️ Quick slash","quick"],["💥 Heavy strike","heavy"],["🛡️ Defend","defend"],["🍖 Snack (heal 15, 1/ fight)","heal"]].forEach(([label,mv])=>{
+      const b=document.createElement("button"); b.className="choice"; b.textContent=label;
+      b.onclick=()=>{ if(mv==="heal"){heal(15); turn("quick");} else turn(mv); };
+      box.appendChild(b);
+    });
+    const flee=document.createElement("button"); flee.className="choice"; flee.textContent="🏃 Flee (lose 10 gold)"; flee.style.background="#ddd";
+    flee.onclick=()=>{ S.gold=Math.max(0,S.gold-10); nodeId="tavern"; render(); };
+    box.appendChild(flee);
+  }
+  log.textContent=`⚔️ WILD BATTLE: ${F.enemy} (HP ${ehp}, ATK ${F.eatk})\nYour HP ${S.hp}. Crew bonus +${S.crew.length*2} dmg!\nChoose your move — 4+ options, choose wisely!`;
+  saveHistory();
+  showMoves();
+}
+function rand(a,b){ return Math.floor(Math.random()*(b-a+1))+a; }
+
+// map
+function drawMap(){
+  const c=document.getElementById("sea"); const x=c.getContext("2d");
+  x.clearRect(0,0,700,140);
+  x.fillStyle="#ffd97a"; [[80,70,"Shell"],[260,50,"Mystery"],[350,90,"Sand"],[520,45,"Sky"],[640,80,"Veil"]].forEach(([ix,iy,label])=>{
+    x.beginPath(); x.arc(ix,iy,18,0,7); x.fill(); x.fillStyle="#111"; x.font="10px sans-serif"; x.fillText(label,ix-20,iy+32); x.fillStyle="#ffd97a";
+  });
+  // player ship
+  x.font="28px serif"; x.fillText("🏴‍☠️",playerX,70);
+  x.fillStyle="#fff"; x.font="11px sans-serif"; x.fillText(S.name||"YOU",playerX-10,100);
+}
+
+function openModal(kind){
+  const m=document.getElementById("modal"), card=document.getElementById("modalCard");
+  m.style.display="block";
+  if(kind==="char"){
+    card.innerHTML=`<h2>🎭 Customize Hero</h2>
+    <label>Name</label><input id="fName" value="${S.name}" placeholder="e.g. Monkey... use your own!">
+    <label>Pronouns</label><select id="fPro"><option>${S.pronouns}</option><option>he/him</option><option>she/her</option><option>they/them</option></select>
+    <label>Fighting Style</label><select id="fStyle">${Object.keys(STYLES).map(k=>`<option ${k===S.style?"selected":""}>${k}</option>`).join("")}</select>
+    <label>Origin</label><select id="fOrg">${ORIGINS.map(k=>`<option ${k===S.origin?"selected":""}>${k}</option>`).join("")}</select>
+    <div class="row"><button class="cheatBtn btn-primary" onclick="saveChar()">Save</button><button class="cheatBtn" onclick="closeModal()">Close</button></div>
+    <p style="opacity:.7">Styles: ${Object.entries(STYLES).map(([k,v])=>k+": "+v.desc).join("<br>")}</p>`;
+  } else if(kind==="save"){
+    card.innerHTML=`<h2>💾 Save / Load</h2>
+    <button class="cheatBtn" onclick="saveGame(1)">Save Slot 1</button>
+    <button class="cheatBtn" onclick="loadGame(1)">Load Slot 1</button>
+    <button class="cheatBtn" onclick="saveGame(2)">Save Slot 2</button>
+    <button class="cheatBtn" onclick="loadGame(2)">Load Slot 2</button>
+    <button class="cheatBtn" onclick="closeModal()">Close</button>`;
+  } else {
+    card.innerHTML=`<h2>⚙️ Cheats & Rewind</h2><p>Side-menu cheats — for fun / testing, not progression.</p>
+    <button class="cheatBtn" onclick="rewindCheat()">↩️ Rewind one choice</button>
+    <button class="cheatBtn" onclick="cheat('god')">✨ God Mode (999 HP/ATK)</button>
+    <button class="cheatBtn" onclick="cheat('gold')">🪙 +500 Gold</button>
+    <button class="cheatBtn" onclick="cheat('heal')">❤️ Full Heal</button>
+    <button class="cheatBtn" onclick="cheat('crew')">👥 Recruit All</button>
+    <button class="cheatBtn" onclick="cheat('boss')">⛈️ Teleport to Finale</button>
+    <button class="cheatBtn" onclick="cheat('clear')">🧹 Normal Mode (reset buffs)</button>
+    <button class="cheatBtn" onclick="closeModal()">Close</button>`;
+  }
+}
+function closeModal(){ document.getElementById("modal").style.display="none"; }
+function saveChar(){
+  S.name=document.getElementById("fName").value||"Lucky";
+  S.pronouns=document.getElementById("fPro").value;
+  S.style=document.getElementById("fStyle").value;
+  S.origin=document.getElementById("fOrg").value;
+  const st=STYLES[S.style]; S.atk=st.atk; S.def=st.def; S.maxHp=st.hp; S.hp=st.hp;
+  closeModal(); render();
+}
+function saveGame(slot){ localStorage.setItem("gss"+slot, JSON.stringify({nodeId,S:{...S,history:[]},playerX})); alert("Saved!"); closeModal(); }
+function loadGame(slot){ const d=localStorage.getItem("gss"+slot); if(!d){alert("Empty");return;} const h=JSON.parse(d); nodeId=h.nodeId; Object.assign(S,h.S); playerX=h.playerX; closeModal(); render(); }
+function rewindCheat(){ closeModal(); rewind(); }
+function cheat(k){
+  if(k==="god"){S.maxHp=999;S.hp=999;S.atk=99;S.def=50;}
+  if(k==="gold"){S.gold+=500;}
+  if(k==="heal"){S.hp=S.maxHp;}
+  if(k==="crew"){["Kara","Borgo","Pico","Mira","Enma","Lin"].forEach(addCrew);}
+  if(k==="boss"){saveHistory(); nodeId="finale";}
+  if(k==="clear"){const st=STYLES[S.style]; S.atk=st.atk; S.def=st.def; S.maxHp=st.hp;}
+  closeModal(); render();
+}
+function restart(){ if(confirm("Restart story?")){ saveHistory(); nodeId="start"; playerX=20; render(); openModal('char'); } }
+document.getElementById("modal").onclick=e=>{ if(e.target.id==="modal") closeModal(); };
+
+openModal('char');
+render();
+</script>
+</body>
+</html>
